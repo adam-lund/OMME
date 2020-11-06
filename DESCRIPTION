@@ -1,4 +1,4 @@
-Package: SMMA
+Package: OMME
 Type: Package
 Title: Soft Maximin Estimation for Large Scale Array-Tensor Models
 Version: 1.0.3
