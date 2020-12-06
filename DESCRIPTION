@@ -1,12 +1,13 @@
 Package: OMME
 Type: Package
 Title: Orthognal Maximin Estimation
-Version: 1.0.3
-Date: 2020-09-17
+Version: 1.0
+Date: 2020-11-20
 Author: Adam Lund
 Maintainer: Adam Lund <adam.lund@math.ku.dk>
-Description: Efficient design matrix free procedure for solving a maximin problem with orthogonal identical desgin across groups  
+Description: Efficient procedure for solving a maximin problem with orthogonal identical desgin across groups  
 License: GPL (>= 2)
+Depends: abind, waveslim
 Imports: Rcpp (>= 0.12.12)
-LinkingTo: Rcpp, RcppArmadillo
+LinkingTo: Rcpp, RcppArmadillo, RcppEigen
 RoxygenNote: 7.1.1

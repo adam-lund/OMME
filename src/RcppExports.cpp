@@ -2,23 +2,56 @@
 // Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 #include <RcppArmadillo.h>
+#include <RcppEigen.h>
 #include <Rcpp.h>
 
 using namespace Rcpp;
 
-// pga
-Rcpp::List pga(arma::mat Phi1, arma::mat Phi2, arma::mat Phi3, Rcpp::NumericVector resp, std::string penalty, double zeta, double c, arma::vec lambda, int nlambda, int makelamb, double lambdaminratio, arma::mat penaltyfactor, double reltol, int maxiter, int steps, int btmax, int mem, double tau, double nu, int alg, int ll, double Lmin);
-RcppExport SEXP _SMMA_pga(SEXP Phi1SEXP, SEXP Phi2SEXP, SEXP Phi3SEXP, SEXP respSEXP, SEXP penaltySEXP, SEXP zetaSEXP, SEXP cSEXP, SEXP lambdaSEXP, SEXP nlambdaSEXP, SEXP makelambSEXP, SEXP lambdaminratioSEXP, SEXP penaltyfactorSEXP, SEXP reltolSEXP, SEXP maxiterSEXP, SEXP stepsSEXP, SEXP btmaxSEXP, SEXP memSEXP, SEXP tauSEXP, SEXP nuSEXP, SEXP algSEXP, SEXP llSEXP, SEXP LminSEXP) {
+// prox
+arma::mat prox(arma::mat const& z, arma::mat const& gam, double del);
+RcppExport SEXP _OMME_prox(SEXP zSEXP, SEXP gamSEXP, SEXP delSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat const& >::type z(zSEXP);
+    Rcpp::traits::input_parameter< arma::mat const& >::type gam(gamSEXP);
+    Rcpp::traits::input_parameter< double >::type del(delSEXP);
+    rcpp_result_gen = Rcpp::wrap(prox(z, gam, del));
+    return rcpp_result_gen;
+END_RCPP
+}
+// magging
+arma::mat magging(arma::mat const& B, Eigen::MatrixXd& Q, const Eigen::MatrixXd& AE, const Eigen::VectorXd& ce, const Eigen::MatrixXd& AI, const Eigen::VectorXd& ci);
+RcppExport SEXP _OMME_magging(SEXP BSEXP, SEXP QSEXP, SEXP AESEXP, SEXP ceSEXP, SEXP AISEXP, SEXP ciSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat const& >::type B(BSEXP);
+    Rcpp::traits::input_parameter< Eigen::MatrixXd& >::type Q(QSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type AE(AESEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type ce(ceSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type AI(AISEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type ci(ciSEXP);
+    rcpp_result_gen = Rcpp::wrap(magging(B, Q, AE, ce, AI, ci));
+    return rcpp_result_gen;
+END_RCPP
+}
+// admm
+Rcpp::List admm(arma::mat dims, int usex, arma::mat B, arma::mat Phi1, arma::mat Phi2, arma::mat Phi3, Rcpp::NumericVector resp, std::string penalty, double kappa, int usekappa, arma::vec lambda, int nlambda, int makelamb, double lambdaminratio, arma::mat penaltyfactor, double reltol, int maxiter, int steps, std::string alg, int bound);
+RcppExport SEXP _OMME_admm(SEXP dimsSEXP, SEXP usexSEXP, SEXP BSEXP, SEXP Phi1SEXP, SEXP Phi2SEXP, SEXP Phi3SEXP, SEXP respSEXP, SEXP penaltySEXP, SEXP kappaSEXP, SEXP usekappaSEXP, SEXP lambdaSEXP, SEXP nlambdaSEXP, SEXP makelambSEXP, SEXP lambdaminratioSEXP, SEXP penaltyfactorSEXP, SEXP reltolSEXP, SEXP maxiterSEXP, SEXP stepsSEXP, SEXP algSEXP, SEXP boundSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type dims(dimsSEXP);
+    Rcpp::traits::input_parameter< int >::type usex(usexSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type B(BSEXP);
     Rcpp::traits::input_parameter< arma::mat >::type Phi1(Phi1SEXP);
     Rcpp::traits::input_parameter< arma::mat >::type Phi2(Phi2SEXP);
     Rcpp::traits::input_parameter< arma::mat >::type Phi3(Phi3SEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericVector >::type resp(respSEXP);
     Rcpp::traits::input_parameter< std::string >::type penalty(penaltySEXP);
-    Rcpp::traits::input_parameter< double >::type zeta(zetaSEXP);
-    Rcpp::traits::input_parameter< double >::type c(cSEXP);
+    Rcpp::traits::input_parameter< double >::type kappa(kappaSEXP);
+    Rcpp::traits::input_parameter< int >::type usekappa(usekappaSEXP);
     Rcpp::traits::input_parameter< arma::vec >::type lambda(lambdaSEXP);
     Rcpp::traits::input_parameter< int >::type nlambda(nlambdaSEXP);
     Rcpp::traits::input_parameter< int >::type makelamb(makelambSEXP);
@@ -27,24 +60,48 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type reltol(reltolSEXP);
     Rcpp::traits::input_parameter< int >::type maxiter(maxiterSEXP);
     Rcpp::traits::input_parameter< int >::type steps(stepsSEXP);
-    Rcpp::traits::input_parameter< int >::type btmax(btmaxSEXP);
-    Rcpp::traits::input_parameter< int >::type mem(memSEXP);
-    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
-    Rcpp::traits::input_parameter< double >::type nu(nuSEXP);
-    Rcpp::traits::input_parameter< int >::type alg(algSEXP);
-    Rcpp::traits::input_parameter< int >::type ll(llSEXP);
-    Rcpp::traits::input_parameter< double >::type Lmin(LminSEXP);
-    rcpp_result_gen = Rcpp::wrap(pga(Phi1, Phi2, Phi3, resp, penalty, zeta, c, lambda, nlambda, makelamb, lambdaminratio, penaltyfactor, reltol, maxiter, steps, btmax, mem, tau, nu, alg, ll, Lmin));
+    Rcpp::traits::input_parameter< std::string >::type alg(algSEXP);
+    Rcpp::traits::input_parameter< int >::type bound(boundSEXP);
+    rcpp_result_gen = Rcpp::wrap(admm(dims, usex, B, Phi1, Phi2, Phi3, resp, penalty, kappa, usekappa, lambda, nlambda, makelamb, lambdaminratio, penaltyfactor, reltol, maxiter, steps, alg, bound));
+    return rcpp_result_gen;
+END_RCPP
+}
+// maglas
+Rcpp::List maglas(arma::mat dims, int usex, arma::mat B, arma::mat Phi1, arma::mat Phi2, arma::mat Phi3, Rcpp::NumericVector resp, std::string penalty, double kappa, int usekappa, arma::vec lambda, int nlambda, int makelamb, double lambdaminratio, arma::mat penaltyfactor, int steps);
+RcppExport SEXP _OMME_maglas(SEXP dimsSEXP, SEXP usexSEXP, SEXP BSEXP, SEXP Phi1SEXP, SEXP Phi2SEXP, SEXP Phi3SEXP, SEXP respSEXP, SEXP penaltySEXP, SEXP kappaSEXP, SEXP usekappaSEXP, SEXP lambdaSEXP, SEXP nlambdaSEXP, SEXP makelambSEXP, SEXP lambdaminratioSEXP, SEXP penaltyfactorSEXP, SEXP stepsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type dims(dimsSEXP);
+    Rcpp::traits::input_parameter< int >::type usex(usexSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type B(BSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Phi1(Phi1SEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Phi2(Phi2SEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type Phi3(Phi3SEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type resp(respSEXP);
+    Rcpp::traits::input_parameter< std::string >::type penalty(penaltySEXP);
+    Rcpp::traits::input_parameter< double >::type kappa(kappaSEXP);
+    Rcpp::traits::input_parameter< int >::type usekappa(usekappaSEXP);
+    Rcpp::traits::input_parameter< arma::vec >::type lambda(lambdaSEXP);
+    Rcpp::traits::input_parameter< int >::type nlambda(nlambdaSEXP);
+    Rcpp::traits::input_parameter< int >::type makelamb(makelambSEXP);
+    Rcpp::traits::input_parameter< double >::type lambdaminratio(lambdaminratioSEXP);
+    Rcpp::traits::input_parameter< arma::mat >::type penaltyfactor(penaltyfactorSEXP);
+    Rcpp::traits::input_parameter< int >::type steps(stepsSEXP);
+    rcpp_result_gen = Rcpp::wrap(maglas(dims, usex, B, Phi1, Phi2, Phi3, resp, penalty, kappa, usekappa, lambda, nlambda, makelamb, lambdaminratio, penaltyfactor, steps));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_SMMA_pga", (DL_FUNC) &_SMMA_pga, 22},
+    {"_OMME_prox", (DL_FUNC) &_OMME_prox, 3},
+    {"_OMME_magging", (DL_FUNC) &_OMME_magging, 6},
+    {"_OMME_admm", (DL_FUNC) &_OMME_admm, 20},
+    {"_OMME_maglas", (DL_FUNC) &_OMME_maglas, 16},
     {NULL, NULL, 0}
 };
 
-RcppExport void R_init_SMMA(DllInfo *dll) {
+RcppExport void R_init_OMME(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
 }

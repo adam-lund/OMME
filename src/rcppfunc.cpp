@@ -6,14 +6,14 @@ using namespace std;
 using namespace arma;
 
 /////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////// algorithm ///////////////////////////////////////////
+/////////////////////////////////// maximin implementation ////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////
 //[[Rcpp::export]]
-Rcpp::List pga(arma::mat Phi1, arma::mat Phi2, arma::mat Phi3,
+Rcpp::List admm(arma::mat dims, int usex, arma::mat B, arma::mat Phi1, arma::mat Phi2, arma::mat Phi3,
                Rcpp::NumericVector resp,
                std::string penalty,
-               double zeta,
-               double c,
+               double kappa,
+               int usekappa,
                arma::vec lambda,
                int nlambda,
                int makelamb,
@@ -22,431 +22,514 @@ Rcpp::List pga(arma::mat Phi1, arma::mat Phi2, arma::mat Phi3,
                double reltol,
                int maxiter,
                int steps,
-               int btmax,
-               int mem,
-               double tau,
-               double nu,
-               int alg,
-               int ll,
-               double Lmin){
+               std::string alg,
+               int bound){
+
 Rcpp::List output;
-Rcpp::NumericVector vecY(resp);
-Rcpp::IntegerVector YDim = vecY.attr("dim");
-const arma::cube Z(vecY.begin(), YDim[0], YDim[1], YDim[2], false);
+Rcpp::NumericVector vecresp(resp);
+Rcpp::IntegerVector respDim = vecresp.attr("dim");
+const arma::cube Y(vecresp.begin(), respDim[0], respDim[1], respDim[2], false);
 
-int ascent, ascentmax,
-    bt, btenter = 0, btiter = 0,
-    endmodelno = nlambda,
-    n1 = Phi1.n_rows, n2 = Phi2.n_rows, n3 = Phi3.n_rows, Nog = Z.n_slices, ng = n1 * n2 * n3,
-    p1 = Phi1.n_cols, p2 = Phi2.n_cols, p3 = Phi3.n_cols, p = p1 * p2 * p3,
-    Stopconv = 0, Stopmaxiter = 0, Stopbt = 0;
 
-double  alphamax, ascad = 3.7,
-       delta, deltamax,
-       L, lossBeta, lossProp, lossX,
-       penBeta, penProp,
-       relobj,
-       val;
+int Tf=2,stopsparse,
+  endmodelno = nlambda,
+    n1 = dims(0,0), n2 = dims(1,0), n3 = dims(2,0),
+  Nog = Y.n_slices, ng = n1 * n2 * n3,
+    p1 = dims(0,1), p2 = dims(1,1), p3 = dims(2,1),
+  p = p1 * p2 * p3, n=n1*n2*n3  ;
 
-arma::vec df(nlambda),
+double  ascad=0.1, epsiloncor=0.2, c=10000.0,alphamax, delta, deltamax,l, in1, lambdamax,
+  in2, in3,  tauk, gamk, alphahat, betahat, sparsity=0;
+
+arma::vec df(nlambda),lambdamaxs(Nog),
           eig1, eig2, eig3,
-          Iter(nlambda),  Pen(maxiter),
-          obj(maxiter + 1),
-          Stops(3),
-          eevX;
+          Iter(nlambda),  Pen(maxiter)      ;
 
-arma::mat absBeta(p1, p2 * p3),
-          Beta(p1, p2 * p3), Betaprev(p1, p2 * p3), Betas(p, nlambda), BT(nlambda, maxiter),
+arma::mat  Beta(p1, p2 * p3), Betatilde(p1, p2 * p3),  sumB(p1,p2*p3),
+
+  Z(p1, p2 * p3), U(p1, p2 * p3),
+           Zold(p1, p2 * p3),
+          L(p1, p2 * p3), Betas(p, nlambda),
+          Betak0(p1, p2 * p3),Zk0(p1, p2 * p3), Lk0(p1, p2 * p3), Lhatk0(p1, p2 * p3),
           Delta(maxiter, nlambda),  dpen(p1, p2 * p3),
-          Gamma(p1, p2 * p3), GradlossX(p1, p2 * p3), GradlossXprev(p1, p2 * p3), GradlossX2(p1, p2 * p3),
-          Obj(maxiter, nlambda),
-          Phi1tPhi1, Phi2tPhi2, Phi3tPhi3, PhitPhiBeta, PhitPhiX, pospart(p1, p2 * p3),
-          Prop(p1, p2 * p3), PhiBeta(n1, n2 * n3), PhiProp(n1, n2 * n3), PhiX(n1, n2 * n3),
+          Gamma(p1, p2 * p3),
+          Phi1tPhi1, Phi2tPhi2, Phi3tPhi3, PhitPhiBeta, PhitPhiX,
           wGamma(p1, p2 * p3),
-          R,
-          S, Sumsqdiff(Nog, Nog),
-          X(p1, p2 * p3), Xprev,
-          Zi;
-
-arma::cube PhitZ(p1, p2 * p3, Nog);
+Lhat(p1, p2 * p3),
+deltaLhat, deltaL,
+deltaHhat,
+deltaGhat;
 
 ////fill variables
-ascentmax = 4;
-double scale = 0.9;
-
-obj.fill(NA_REAL);
 Betas.fill(42);
 Iter.fill(0);
-GradlossXprev.fill(0);
-BT.fill(-1);
 
-Delta.fill(NA_REAL);
-Obj.fill(NA_REAL);
-Pen.fill(0);
-
-////precompute
-Phi1tPhi1 = Phi1.t() * Phi1;
-Phi2tPhi2 = Phi2.t() * Phi2;
-Phi3tPhi3 = Phi3.t() * Phi3;
-eig1 = arma::eig_sym(Phi1tPhi1);
-eig2 = arma::eig_sym(Phi2tPhi2);
-eig3 = arma::eig_sym(Phi3tPhi3);
-alphamax = as_scalar(max(kron(eig1, kron(eig2 , eig3))));
-
-////precompute
+////precompute ///// compute group ols estimates!!!!
+if(makelamb == 1){
+sumB.fill(0);
+}
 for(int j = 0; j < Nog; j++){
+arma::mat tmp;
 
-PhitZ.slice(j) = RHmat(Phi3.t(), RHmat(Phi2.t(), RHmat(Phi1.t(), Z.slice(j), n2, n3), n3, p1), p1, p2);
-
+if(usex == 1){
+tmp = RHmat(Phi3.t(), RHmat(Phi2.t(), RHmat(Phi1.t(), Y.slice(j), n2, n3), n3, p1), p1, p2);
+B.col(j) = vectorise(tmp);
+}else{
+tmp = reshape(B.col(j), p1, p2*p3);
 }
-
-////proximal step size
-// Sumsqdiff.fill(0);
-// for(int i = 0; i < Nog; i++){
-// Zi = Z.slice(i);
-// for(int j = i + 1; j < Nog; j++){Sumsqdiff(i,j) = sum_square(Zi - Z.slice(j));}
-// }
-
-mat A(Nog, Nog);
-mat PhitZi;
-A.fill(0);
-for(int i = 0; i < Nog; i++){
-PhitZi = PhitZ.slice(i);
-for(int j = i + 1; j < Nog; j++){
-A(i,j) = sum_square(PhitZi- PhitZ.slice(j));
-}
-}
-
-L =  4  / pow(ng, 2) * (max(max(A)) + alphamax*ng / 2); //upper bound on Lipschitz constant
-//L =  4 * alphamax / pow(ng, 2) * (max(max(Sumsqdiff)) + ng / 2); //upper bound on Lipschitz constant
-delta = nu * 1.9 / L; //stepsize scaled up by  nu
-deltamax = 1.99 / L; //maximum theoretically allowed stepsize
-if(Lmin == 0){Lmin = (1 / nu) * L;}
-
-////initialize
-Betaprev.fill(0);
-Beta = Betaprev;
-PhiBeta = RHmat(Phi3, RHmat(Phi2, RHmat(Phi1, Beta, p2, p3), p3, n1), n1, n2);
-PhitPhiBeta = RHmat(Phi3tPhi3, RHmat(Phi2tPhi2, RHmat(Phi1tPhi1, Beta, p2, p3), p3, p1), p1, p2);
-
-lossBeta = softmaxloss(-eev(PhiBeta, Z, ng), zeta, ll);
 
 ////make lambda sequence
-if(makelamb == 1){
+if(makelamb == 1){//fix?!?!? what is this used for and how?!!!???!
 
-arma::mat Ze = zeros<mat>(n1, n2 * n3);
-arma::mat absgradzeroall(p1, p2 * p2);
-
-absgradzeroall = abs(gradloss(PhitZ, PhitPhiBeta, -eev(PhiBeta, Z, ng), ng, zeta, ll));
-
+arma::mat   absgradzeroall = abs(tmp) %      penaltyfactor;
 arma::mat absgradzeropencoef = absgradzeroall % (penaltyfactor > 0);
 arma::mat penaltyfactorpencoef = (penaltyfactor == 0) * 1 + penaltyfactor;
-double lambdamax = as_scalar(max(max(absgradzeropencoef / penaltyfactorpencoef)));
-double m = log(lambdaminratio);
-double M = 0;
-double difflamb = abs(M - m) / (nlambda - 1);
-double l = 0;
-
-for(int i = 0; i < nlambda ; i++){
-
-lambda(i) = lambdamax * exp(l);
-l = l - difflamb;
+lambdamaxs(j) = as_scalar(max(max(absgradzeropencoef / penaltyfactorpencoef)));
+sumB = sumB + tmp;
 
 }
 
-}else{std::sort(lambda.begin(), lambda.end(), std::greater<int>());}
+}
+
+if(makelamb == 1){//lambmax is the soft maximin lamb max...
+  lambdamax = max(max(abs(sumB / Nog)));
+}
+
+if(makelamb == 1){
+
+  if(usekappa == 1){//go from 0 towards lambmax linearly
+    double M = 0;
+    double difflamb = log(2) / pow(nlambda,4); //exp
+    //double difflamb =  lambdamax/ nlambda; //lin
+    lambda(0) = 0;
+    for(int i = 1; i < (nlambda + 0) ; i++){
+      lambda(i) = lambdamax * (exp(pow(i,4) * difflamb) - 1); //exponential
+      //lambda(i) =   lambda(i - 1) + difflamb; //linear
+    }
+
+//   double M = 0;
+// //double difflamb = log(2) / nlambda; //abs(M - m) / (nlambda - 1);
+// double difflamb =  lambdamax/ nlambda; //abs(M - m) / (nlambda - 1);
+// //double l = 0;
+// lambda(0) = 0;
+// for(int i = 1; i < (nlambda + 0) ; i++){
+//
+// //lambda(i) = lambdamax * (exp(i * difflamb) - 1);
+// lambda(i) =   lambda(i - 1) + difflamb;
+// //l = l - difflamb;
+//
+// }
+
+}else{//go lambmax to lambmin exponentially
+  double lambdamax = 2 * max(lambdamaxs) / Nog;
+  double m = log(lambdaminratio);
+  double M = 0;
+  double difflamb = abs(M - m) / (nlambda - 1);
+  double l = 0;
+  for(int i = 0; i < (nlambda - 1) ; i++){
+    lambda(i) = lambdamax * exp(i * difflamb);
+    l = l - difflamb;
+}
+}
+}else{std::sort(lambda.begin(), lambda.end()//, std::greater<int>()
+                  );}//fix!!! sort decreasing ot not??!!!
+
+
+///// /////initilize how!?!?!
+////set up projection problem
+arma::mat AE(Nog, 1), AI(Nog, Nog), ce(1, 1), ci(Nog, 1);
+AE.ones();
+Eigen::MatrixXd eigen_AE = eigen_cast(AE);
+ce.fill(-1);
+Eigen::VectorXd eigen_ce = eigen_cast(ce);
+AI.eye();
+Eigen::MatrixXd eigen_AI = eigen_cast(AI);
+ci.zeros();
+Eigen::VectorXd eigen_ci = eigen_cast(ci);
+
+////this computation can be halfed by symmetry but maybe thats done on by arma already??
+arma::mat Q = B.t() * B;
+Eigen::MatrixXd eigen_Q = eigen_cast(Q);
+
+//// fixed step size COULD WE USE THE LIP CONSTANT???!!!////precompute what to do with no phi?!?!?!?!
+// Phi1tPhi1 = Phi1.t() * Phi1;
+// Phi2tPhi2 = Phi2.t() * Phi2;
+// Phi3tPhi3 = Phi3.t() * Phi3;
+// eig1 = arma::eig_sym(Phi1tPhi1);
+// eig2 = arma::eig_sym(Phi2tPhi2);
+// eig3 = arma::eig_sym(Phi3tPhi3);
+// alphamax = as_scalar(max(kron(eig1, kron(eig2 , eig3))));
+
+l =  4  / pow(ng, 2) ; //?!?!?!?!?!?! //upper bound on Lipschitz constant
+//delta =  1.9 / l; //stepsize scaled up by  nu
+deltamax = 1.99 / l; //maximum theoretically allowed stepsize
+
+double ABSTOL   = 1e-7; //FIX!?!?!
+double RELTOL   = 1e-7; //FIX!?!?!
+delta = 1;//delta?!?!?!fixed stepsize!!!!!!!
+double rho = 1/delta; //FIX!?!?!
+tauk = 0.1; //FIX!?!?!
+gamk = 1.0; //FIX!?!?!
+
+Beta =  reshape(B.col(1), p1, p2*p3);
+Z= reshape(B.col(2), p1, p2*p3);
+U.fill(0);
+L= Beta + Z;
+
+Betak0 = Beta;
+Zk0 = Z;
+Lk0 = L;
+Lhatk0 = Lhat;
+
+arma::vec hr_norm(maxiter), hs_norm(maxiter), heps_dual(maxiter), heps_pri(maxiter);
 
 ///////////start lambda loop
-for (int j = 0; j < nlambda; j++){
-
-Gamma = penaltyfactor * lambda(j);
-
-ascent = 0;
+for (int m = 0; m < nlambda; m++){
+Gamma = penaltyfactor * lambda(m);
 
 //start MSA loop
 for (int s = 0; s < steps; s++){
 
-if(s == 0){
+if(s == 0){//fix!!!!! division by zero for non lasso penalty!!!
 
-if(penalty != "lasso"){wGamma = Gamma / lambda(j);}else{wGamma = Gamma;}
+if(penalty != "lasso"){wGamma = Gamma / lambda(m);}else{wGamma = Gamma;}
 
-}else{
+}else{///fix!!!!! division by zero for non lasso penalty!!!
 
-if(penalty == "scad"){
+if(penalty == "scad"){//can we use this ???!?!? scad is multi lasso and each lasso is ok...
 
-absBeta = abs(Beta);
-pospart = ((ascad * Gamma - absBeta) + (ascad * Gamma - absBeta)) / 2;
-dpen = sign(Beta) % Gamma % ((absBeta <= Gamma) + pospart / (ascad - 1) % (absBeta > Gamma));
-wGamma = abs(dpen) % Gamma / lambda(j) % (Beta != 0) + lambda(j) * (Beta == 0);
-
-}
+arma::mat absBeta = abs(Beta);
+  arma::mat pospart = ((ascad * Gamma - absBeta) + (ascad * Gamma - absBeta)) / 2;
+  arma::mat dpen = sign(Beta) % Gamma % ((absBeta <= Gamma) + pospart / (ascad - 1) % (absBeta > Gamma));
+wGamma = abs(dpen) % Gamma / lambda(m) % (Beta != 0) + lambda(m) * (Beta == 0);
 
 }
 
-/////start proximal loop
-if(alg == 1){/////////////////NPG algorithm from chen2016
+}
 
+/////////////////ADMM algorithm from ...boyd ... figuerido
 for (int k = 0; k < maxiter; k++){
 
-if(k == 0){
+if(alg == "admm"){//boyd
+//x-update, prox operator for f
+Beta = prox(Z - U, wGamma , delta);
 
-Betaprev = Beta;
-Xprev = Betaprev;
-obj(k) = lossBeta + l1penalty(wGamma, Beta);
-Obj(k, j) = obj(k);
-Delta(k, j) = delta;
+//z-update, projection onto to convex hull of columns in B
+Zold = Z;
+Z = proj(B, Beta + U, eigen_Q, eigen_AE, eigen_ce, eigen_AI, eigen_ci, p1, p2, p3);
 
-}else{//if not the first iteration
+//u-update
+U = U + Beta - Z;
+}
+if(alg == "aradmm"){  //L/tauk=-U!!!
 
-//if(acc == 1){
-//X = Beta + (k - 2) / (k + 1) * (Beta - Betaprev);//  nesterov update.....
-//}else{
-X = Beta;
-Xprev = Betaprev;
+//update
+  Beta = prox(Z - U, wGamma , 1 / tauk); // tauk isnt setpsize but multiplier!!
+  Betatilde = gamk * Beta + (1 - gamk) * Z;
+  Zold = Z;
+  Z = proj(B, Beta + U, eigen_Q, eigen_AE, eigen_ce, eigen_AI, eigen_ci, p1, p2, p3);
+  L = L + tauk * (Z - Betatilde);
+  U = -L / tauk; //=-L/tauk+Betatilde-Z;
 
-//}
+//step size calculation
+if((k % Tf) == 1){
+deltaL = L - Lk0;
+Lhat = L + tauk * (-Beta + Zold);
+deltaLhat = Lhat - Lhatk0;
+deltaHhat = Beta - Betak0;
+deltaGhat = -(Z - Zk0);
 
-PhiX = RHmat(Phi3, RHmat(Phi2, RHmat(Phi1, X, p2, p3), p3, n1), n1, n2);
-eevX = -eev(PhiX, Z, ng);
-PhitPhiX = RHmat(Phi3tPhi3, RHmat(Phi2tPhi2, RHmat(Phi1tPhi1, X, p2, p3), p3, p1), p1, p2);
-GradlossX = gradloss(PhitZ, PhitPhiX, eevX, ng, zeta, ll);
-lossX = softmaxloss(eevX, zeta, ll);
-
-if(k > 1){
-S = X - Xprev;
-R = GradlossX - GradlossXprev;
-double tmp = as_scalar(accu(S % R )/ sum_square(S)); //is this corrert???
-tmp = std::max(tmp, Lmin);
-delta = 1 / std::min(tmp, pow(10,8));
+//could be its own function???
+in1 = accu(square(deltaLhat));
+in2 = accu(square(deltaHhat));
+in3 = accu(deltaHhat % deltaLhat);
+double alphahatsd = in1 / in3;
+double alphahatmg = in3 / in2;
+double alphacor = in3 / (sqrt(in1) * sqrt(in2));
+if(alphahatmg > alphahatsd / 2){
+alphahat = alphahatmg;
 }else{
-delta = 1;
+alphahat = alphahatsd - alphahatmg / 2;
 }
-////proximal backtracking from chen2016
-BT(j, k) = 0;
-while(BT(j, k) < btmax){
 
-Prop = prox_l1(X - delta * GradlossX, delta * wGamma);
-PhiProp = RHmat(Phi3, RHmat(Phi2, RHmat(Phi1, Prop, p2, p3), p3, n1), n1, n2);
-lossProp = softmaxloss(-eev(PhiProp, Z, ng), zeta, ll);
-
-val = as_scalar(max(obj(span(std::max(0, k - mem), k - 1))) - c / 2 * sum_square(Prop - Betaprev));
-penProp = l1penalty(wGamma, Prop);
-
-if (lossProp + penProp <= val + 0.0000001){
-
-break;
-
+//beta correct?!?
+in1 = accu(square(deltaL));
+in2 = accu(square(deltaGhat));
+in3 = accu(deltaGhat % deltaL);
+double betahatsd = in1 / in3;
+double betahatmg = in3 / in2;
+double betacor = in3 / (sqrt(in1) * sqrt(in2));
+if(betahatmg > betahatsd / 2){
+betahat = betahatmg;
 }else{
-
-delta = delta / tau; //tau>1, scaling delta down instead of L up...
-BT(j, k) = BT(j, k) + 1;
-
+betahat = betahatsd - betahatmg / 2;
 }
 
-}//end line search
+//update steps
+if((alphacor > epsiloncor) && (betacor > epsiloncor)){
+tauk = sqrt(alphahat * betahat);
+gamk = 1 + 2 * sqrt(alphahat * betahat) / (alphahat + betahat);
+}
+else if((alphacor > epsiloncor) && (betacor <= epsiloncor)){
+tauk = alphahat;
+gamk = 1.9;
+}
+else if((alphacor <= epsiloncor) && (betacor > epsiloncor)){
+tauk = betahat;
+gamk = 1.1;
+}
+else{gamk=1.5;}
 
-////check if maximum number of proximal backtraking step is reached
-if(BT(j, k) == btmax){Stopbt = 1;}
+//bound stpes
+if(bound == 1){
+tauk = min(tauk, (1 + c / pow(k,2)) * tauk);
+gamk = min(gamk, 1 + c / pow(k,2));
+}
 
-Betaprev = Beta;
-GradlossXprev = GradlossX;
-Beta = Prop;
-lossBeta = lossProp;
-penBeta = penProp;
-obj(k) = lossBeta + penBeta;
-Pen(k) = penBeta;
-Obj(k, j) = obj(k);
-Iter(j) = k;
-Delta(k, j) = delta;
-
-////proximal convergence check
-relobj = abs(obj(k) - obj(k - 1)) / (reltol + abs(obj(k - 1)));
-
-if(k < maxiter - 1 && relobj < reltol){
-
-df(j) = p - accu((Beta == 0));
-Betas.col(j) = vectorise(Beta);
-obj.fill(NA_REAL);
-Stopconv = 1;
-break;
-
-}else if(k == maxiter - 1){
-
-df(j) = p - accu((Beta == 0));
-Betas.col(j) = vectorise(Beta);
-obj.fill(NA_REAL);
-Stopmaxiter = 1;
-break;
+//store k0 values
+Betak0 = Beta;
+Zk0 = Z;
+Lk0 = L;
+Lhatk0 = Lhat;
 
 }
 
 }
+Iter(m) = k + 1;
 
-////break proximal loop if maximum number of proximal backtraking step is reached
-if(Stopbt == 1 || Stopmaxiter == 1){
-
-Betas.col(j) = vectorise(Beta);
-break;
-
-}
-
-}//end proximal loop
-
-}else{////FISTA
-
-for (int k = 0; k < maxiter; k++){
-
-if(k == 0){
-
-Betaprev = Beta;
-X = Beta;
-obj(k) = lossBeta + l1penalty(wGamma, Beta);
-Obj(k, j) = obj(k);
-BT(j, k) = 1; //force initial backtracking
-Delta(k, j) = delta;
-
-}else{
-
-X = Beta + (k - 2) / (k + 1) * (Beta - Betaprev);
-
-PhiX = RHmat(Phi3, RHmat(Phi2, RHmat(Phi1, X, p2, p3), p3, n1), n1, n2);
-eevX = -eev(PhiX, Z, ng);
-PhitPhiX = RHmat(Phi3tPhi3, RHmat(Phi2tPhi2, RHmat(Phi1tPhi1, X, p2, p3), p3, p1), p1, p2);
-GradlossX = gradloss(PhitZ, PhitPhiX, eevX, ng, zeta, ll);
-
-////check if proximal backtracking occurred last iteration
-if(BT(j, k - 1) > 0){bt = 1;}else{bt = 0;}
-
-////check for divergence
-if(ascent > ascentmax){bt  = 1;}
-
-if((bt == 1 && deltamax < delta) || nu > 1){//backtrack
-
-lossX = softmaxloss(eevX, zeta, ll);
-BT(j, k) = 0;
-
-while(BT(j, k) < btmax){//start backtracking
-
-Prop = prox_l1(X - delta * GradlossX, delta * wGamma);
-PhiProp = RHmat(Phi3, RHmat(Phi2, RHmat(Phi1, Prop, p2, p3), p3, n1), n1, n2);
-lossProp = softmaxloss(-eev(PhiProp, Z, ng), zeta, ll);
-
-val = as_scalar(lossX + accu(GradlossX % (Prop - X))
-                      + 1 / (2 * delta) * sum_square(Prop - X));
-
-if(lossProp <= val + 0.0000001){ //need to add a little due to numerical issues
-
-break;
-
-}else{
-
-delta = scale * delta;
-BT(j, k) = BT(j, k) + 1;
-
-//if(delta < deltamax){delta = deltamax;}
-
-}
-
-}//end backtracking
- ////check if maximum number of proximal backtraking step is reached
-if(BT(j, k) == btmax){Stopbt = 1;}
-
-}else{//no backtracking
-
-Prop = prox_l1(X - delta * GradlossX, delta * wGamma);
-PhiProp = RHmat(Phi3, RHmat(Phi2, RHmat(Phi1, Prop, p2, p3), p3, n1), n1, n2);
-lossProp = softmaxloss(-eev(PhiProp, Z, ng), zeta, ll);
-
-}
-
-
-
-    Betaprev = Beta;
-    Beta = Prop;
-    lossBeta = lossProp;
-    obj(k) = lossBeta + l1penalty(wGamma, Beta);
-    Iter(j) = k;
-    Delta(k, j) = delta;
-    Obj(k, j) = obj(k);
-
-
-    ////proximal divergence check
-    if(obj(k) > obj(k - 1)){ascent = ascent + 1;}else{ascent = 0;}
-
-  relobj = abs(obj(k) - obj(k - 1)) / (reltol + abs(obj(k - 1)));
-
-  if(k < maxiter - 1 && relobj < reltol){
-
-    df(j) = p - accu((Beta == 0));
-    Betas.col(j) = vectorise(Beta);
-    obj.fill(NA_REAL);
-    Stopconv = 1;
+// diagnostics, reporting, termination checks IS ng CORRECT???????
+hr_norm(k) = accu(square(Beta - Z));
+hs_norm(k) = accu(square(-rho * (Z - Zold)));
+heps_pri(k) = sqrt(ng) * ABSTOL + RELTOL * max(accu(square(Beta)), accu(square(-Z)));
+heps_dual(k) = sqrt(ng) * ABSTOL + RELTOL * accu(square(rho* U));
+if((//k>3 &&
+   (hr_norm(k) < heps_pri(k)) && (hs_norm(k) < heps_dual(k))) || (k == maxiter - 1)){//k>3!??!?!!?!?
+  arma::mat stBetavec = vectorise(st(Beta, wGamma));
+  Betas.col(m) = stBetavec; //is wGAMMA correct????????
+    sparsity = accu(stBetavec == 0) ;
+  df(m) = p - sparsity;
     break;
+}//
 
-  }else if(k == maxiter - 1){
+///EHAT TO DO IF K ==MAXITER??????!?!?!?!
 
-    df(j) = p - accu((Beta == 0));
-    Betas.col(j) = vectorise(Beta);
-    obj.fill(NA_REAL);
-    Stopmaxiter = 1;
-    break;
-
-  }
-
-}
-
-////break proximal loop if maximum number of proximal backtraking step is reached
-if(Stopbt == 1){
-
-  Betas.col(j) = vectorise(Beta);
-  break;
-
-}
-
-}//end proximal loop
-
-}
+}//end admm loop
 
 //Stop msa loop if maximum number of backtracking steps or maxiter is reached
-if(Stopbt == 1 || Stopmaxiter == 1){
-
-endmodelno = j;
-break;
-
-}
+//if(Stopbt == 1 || Stopmaxiter == 1){
+//
+// endmodelno = j;
+// break;
+//
+// }
 
 }//end MSA loop
-
 //Stop lambda loop if maximum number of backtracking steps or maxiter is reached
-if(Stopbt == 1 || Stopmaxiter == 1){
+// endmodelno = m;
+//
+// if(kappa <  sparsity / (p * 1.0) //|| Stopmaxiter == 1
+//      ){
+//  stopsparse=1;
+//  // m=nlambda;
+//   break;
+//
+// }
 
-  endmodelno = j;
+endmodelno = m + 1;
+
+if((usekappa == 1 & kappa <  sparsity / (p * 1.0))){
+  stopsparse=1;
   break;
-
 }
+
 
 }//end lambda loop
 
-Stops(0) = Stopconv;
-Stops(1) = Stopmaxiter;
-Stops(2) = Stopbt;
-btenter = accu((BT > -1));
-btiter = accu((BT > 0) % BT);
+// Stops(0) = Stopconv;
+// Stops(1) = Stopmaxiter;
+
 
 output = Rcpp::List::create(Rcpp::Named("Beta") = Betas,
-                            Rcpp::Named("df") = df,
-                            Rcpp::Named("btenter") = btenter,
-                            Rcpp::Named("btiter") = btiter,
-                            Rcpp::Named("Obj") = Obj,
+                             Rcpp::Named("df") = df,
+                            Rcpp::Named("B") = B,
+                            Rcpp::Named("stopsparse") = stopsparse,
+                            Rcpp::Named("Z") = kappa,
+                            Rcpp::Named("U") = sparsity,
                             Rcpp::Named("Iter") = Iter,
-                            Rcpp::Named("endmodelno") = endmodelno,
-                            Rcpp::Named("lambda") = lambda,
-                            Rcpp::Named("BT") = BT,
-                            Rcpp::Named("L") = L,
-                            Rcpp::Named("Delta") = Delta,
-                            Rcpp::Named("Sumsqdiff") = Sumsqdiff,
-                            Rcpp::Named("Stops") = Stops);
+                             Rcpp::Named("endmodelno") = endmodelno,
+                             Rcpp::Named("lambda") = lambda
+                            // Rcpp::Named("L") = L,
+                           // Rcpp::Named("Stops") = Stops
+                              );
 
 return output;
+
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////// magging implementation /////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////
+//[[Rcpp::export]]
+Rcpp::List maglas(arma::mat dims, int usex,
+                  arma::mat B, arma::mat Phi1, arma::mat Phi2, arma::mat Phi3,
+                    Rcpp::NumericVector resp,
+                    std::string penalty,
+                    double kappa,
+                    int usekappa,
+                    arma::vec lambda,
+                    int nlambda,
+                    int makelamb,
+                    double lambdaminratio,
+                    arma::mat penaltyfactor,
+                    int steps){
+
+  Rcpp::List output;
+  Rcpp::NumericVector vecresp(resp);
+  Rcpp::IntegerVector respDim = vecresp.attr("dim");
+  const arma::cube Y(vecresp.begin(), respDim[0], respDim[1], respDim[2], false);
+
+
+  int Tf=2,stopsparse = 0,
+    endmodelno = nlambda,
+    n1 = dims(0,0), n2 = dims(1,0), n3 = dims(2,0),
+    Nog = Y.n_slices, ng = n1 * n2 * n3,
+    p1 = dims(0,1), p2 = dims(1,1), p3 = dims(2,1),
+    p = p1 * p2 * p3, n=n1*n2*n3  ;
+
+  double  ascad=0.1, sparsity= 0;
+
+  arma::vec df(nlambda),lambdamaxs(Nog)     ;
+
+  arma::mat  stB, Q, Betas(p, nlambda), Penaltyfactor(p1* p2 * p3, Nog), //stBs(Nog * p1* p2 * p3, nlambda),
+  dpen(p1, p2 * p3),
+  Gamma(p1, p2 * p3),          wGamma(p1, p2 * p3), posdefscale;
+
+
+  ////fill variables
+  Betas.fill(42);
+  posdefscale.eye(Nog,Nog);
+  posdefscale = posdefscale * 0.000001;
+  ////precompute ///// compute group ols estimates!!!!
+  for(int j = 0; j < Nog; j++){
+    Penaltyfactor.col(j)= vectorise(penaltyfactor);
+    arma::mat tmp;
+    if(usex == 1){
+      tmp = RHmat(Phi3.t(), RHmat(Phi2.t(), RHmat(Phi1.t(), Y.slice(j), n2, n3), n3, p1), p1, p2);
+      B.col(j) = vectorise(tmp);
+    }else{
+      tmp = reshape(B.col(j), p1, p2*p3);
+    }
+    if(makelamb == 1){
+      arma::mat   absgradzeroall = abs(tmp) % penaltyfactor;
+      arma::mat absgradzeropencoef = absgradzeroall % (penaltyfactor > 0);
+      arma::mat penaltyfactorpencoef = (penaltyfactor == 0) * 1 + penaltyfactor;
+      lambdamaxs(j) = as_scalar(max(max(absgradzeropencoef / penaltyfactorpencoef)));
+    }
+
+  }
+
+  ////set up quad  problem
+  arma::mat AE(Nog, 1), AI(Nog, Nog), ce(1, 1), ci(Nog, 1);
+  AE.ones();
+  Eigen::MatrixXd eigen_AE = eigen_cast(AE);
+  ce.fill(-1);
+  Eigen::VectorXd eigen_ce = eigen_cast(ce);
+  AI.eye();
+  Eigen::MatrixXd eigen_AI = eigen_cast(AI);
+  ci.zeros();
+  Eigen::VectorXd eigen_ci = eigen_cast(ci);
+  Eigen::MatrixXd eigen_Q;
+
+  ////make lambda sequence
+  if(makelamb == 1){
+  if(usekappa == 1){//go from 0 towards lambmax linearly/expo
+    double lambdamax = max(lambdamaxs);
+    double M = 0;
+    double difflamb = log(2) / pow(nlambda,4); //exp
+    //double difflamb =  lambdamax/ nlambda; //lin
+    //double l = 0;
+    lambda(0) = 0;
+    for(int i = 1; i < (nlambda + 0) ; i++){
+
+      lambda(i) = lambdamax * (exp(pow(i,4) * difflamb) - 1); //exponential
+      //lambda(i) =   lambda(i - 1) + difflamb; //linear
+      //l = l - difflamb;
+    }
+
+  }else{//go lambmax to lambmin exponentially as normal
+    arma::mat Ze = zeros<mat>(n1, n2 * n3);
+    double lambdamax = max(lambdamaxs);
+    double m = log(lambdaminratio);
+    double M = 0;
+    double difflamb = abs(M - m) / (nlambda - 1);
+    double l = 0;
+
+    for(int i = 0; i < nlambda ; i++){
+
+      lambda(i) = lambdamax * exp(l);
+      l = l - difflamb;
+  }
+  }
+  }else{std::sort(lambda.begin(), lambda.end(), std::greater<int>());}
+
+
+  ///////////start lambda loop
+  for (int m = 0; m < nlambda; m++){
+    Gamma = Penaltyfactor * lambda(m);
+
+    //start MSA loop
+    for (int s = 0; s < steps; s++){
+
+      if(s == 0){
+
+        if(penalty != "lasso"){wGamma = Gamma / lambda(m);}else{wGamma = Gamma;}
+
+      }else{
+
+        if(penalty == "scad"){//can we use this ???!?!? scad is multi lasso and each lasso is ok...
+
+//          HOW DOES THIS WORK?! ITERATION HHOW?!?!
+
+          // arma::mat absBeta = abs(Beta);
+          // arma::mat pospart = ((ascad * Gamma - absBeta) + (ascad * Gamma - absBeta)) / 2;
+          // arma::mat dpen = sign(Beta) % Gamma % ((absBeta <= Gamma) + pospart / (ascad - 1) % (absBeta > Gamma));
+          // wGamma = abs(dpen) % Gamma / lambda(m) % (Beta != 0) + lambda(m) * (Beta == 0);
+
+        }
+
+      }
+      ////this computation can be halvfed by symmetry but maybe thats done on by arma already??
+      stB = st(B, wGamma);
+     // stBs.col(m) = vectorise(stB);
+      Q = stB.t() * stB + posdefscale;
+      eigen_Q = eigen_cast(Q);
+
+      // Betas.col(m) = magging(stB, eigen_Q,eigen_AE, eigen_ce, eigen_AI, eigen_ci);
+      arma::mat tmp = magging(stB, eigen_Q, eigen_AE, eigen_ce, eigen_AI, eigen_ci);
+      sparsity = accu(tmp == 0);
+      Betas.col(m)=tmp;
+        df(m)= p - sparsity;
+
+    }//end MSA loop
+     endmodelno = m + 1;
+
+    if((usekappa == 1 & kappa <  sparsity / (p * 1.0))){
+       stopsparse=1;
+      break;
+    }
+
+
+  }//end lambda loop
+
+  output = Rcpp::List::create(Rcpp::Named("Beta") = Betas,
+                              Rcpp::Named("stopsparse") = stopsparse,
+                              Rcpp::Named("B") = B,
+                              Rcpp::Named("df") = df,
+                              Rcpp::Named("endmodelno") = endmodelno,
+                              Rcpp::Named("lambda") = lambda
+  );
+
+  return output;
 
 }
